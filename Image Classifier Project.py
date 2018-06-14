@@ -21,7 +21,7 @@
 # 
 # First up is importing the packages you'll need. It's good practice to keep all the imports at the beginning of your code. As you work through this notebook and find you need to import a package, make sure to add the import up here.
 
-# In[101]:
+# In[202]:
 
 
 # Imports here
@@ -29,6 +29,7 @@
 get_ipython().run_line_magic('matplotlib', 'inline')
 get_ipython().run_line_magic('config', "InlineBackend.figure_format = 'retina'")
 import sys
+import os
 from collections import OrderedDict
 
 import numpy as np
@@ -37,12 +38,15 @@ import time
 import torch
 from torch import nn
 from torch import optim
-from torchvision import datasets, transforms
-import torchvision.models as models
+from torchvision import datasets, transforms, models
+import torchvision
 import torch.nn.functional as F
-
+from PIL import Image
 
 import matplotlib.pyplot as plt
+
+
+
 
 
 # ## Load the data
@@ -54,7 +58,7 @@ import matplotlib.pyplot as plt
 # The pre-trained networks you'll use were trained on the ImageNet dataset where each color channel was normalized separately. For all three sets you'll need to normalize the means and standard deviations of the images to what the network expects. For the means, it's `[0.485, 0.456, 0.406]` and for the standard deviations `[0.229, 0.224, 0.225]`, calculated from the ImageNet images.  These values will shift each color channel to be centered at 0 and range from -1 to 1.
 #  
 
-# In[102]:
+# In[203]:
 
 
 data_dir = 'flowers'
@@ -63,38 +67,48 @@ valid_dir = data_dir + '/valid'
 test_dir = data_dir + '/test'
 
 
-# In[103]:
+# In[204]:
 
 
 # TODO: Define your transforms for the training, validation, and testing sets
-data_transforms = transforms.Compose([transforms.Resize(224),
-                                      transforms.CenterCrop(224),
-                                      transforms.ToTensor(),
-                                      transforms.Normalize(mean = [0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-             
-
-#This might be where our issue is as the end product does not appear to be in a 0 - 1 tensor
-
-dataset =  datasets.ImageFolder(data_dir, transform=transforms)
-dataloader = torch.utils.data.DataLoader(dataset, batch_size=32, shuffle=True)
 
 
-# Download and load the training data
+train_transforms = transforms.Compose([transforms.Resize(224),
+                                       transforms.CenterCrop(224),
+                                       transforms.RandomRotation(30),
+                                       transforms.RandomResizedCrop(100),
+                                       transforms.RandomHorizontalFlip(),
+                                       transforms.ToTensor(),
+                                       transforms.Normalize([0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
+test_transforms = transforms.Compose([transforms.Resize(224),
+                                       transforms.CenterCrop(224),
+                                       transforms.RandomRotation(30),
+                                       transforms.RandomResizedCrop(100),
+                                       transforms.RandomHorizontalFlip(),
+                                       transforms.ToTensor(),
+                                       transforms.Normalize([0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
-# Download and load the test data
+valid_transforms = transforms.Compose([transforms.Resize(224),
+                                       transforms.CenterCrop(224),
+                                       transforms.RandomRotation(30),
+                                       transforms.RandomResizedCrop(100),
+                                       transforms.RandomHorizontalFlip(),
+                                       transforms.ToTensor(),
+                                       transforms.Normalize([0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
 
 
 # TODO: Load the datasets with ImageFolder
-trainset = datasets.ImageFolder(train_dir, transform = data_transforms)
-testset = datasets.ImageFolder(test_dir, transform = data_transforms)
-validset = datasets.ImageFolder(valid_dir, transform = data_transforms)
+trainset = datasets.ImageFolder(train_dir, transform = train_transforms)
+testset = datasets.ImageFolder(test_dir, transform = test_transforms)
+validset = datasets.ImageFolder(valid_dir, transform = valid_transforms)
+
 
 
 # TODO: Using the image datasets and the trainforms, define the dataloaders
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=62, shuffle=True),
-testloader = torch.utils.data.DataLoader(testset, batch_size=32, shuffle=True)
-validloader = torch.utils.data.DataLoader(validset, batch_size=32, shuffle=True)
+trainloader = torch.utils.data.DataLoader(trainset, batch_size=64, shuffle=True),
+testloader = torch.utils.data.DataLoader(testset, batch_size=32)
+validloader = torch.utils.data.DataLoader(validset, batch_size=32)
 
 
 
@@ -102,65 +116,16 @@ validloader = torch.utils.data.DataLoader(validset, batch_size=32, shuffle=True)
 # 
 # You'll also need to load in a mapping from category label to category name. You can find this in the file `cat_to_name.json`. It's a JSON object which you can read in with the [`json` module](https://docs.python.org/2/library/json.html). This will give you a dictionary mapping the integer encoded categories to the actual names of the flowers.
 
-# In[104]:
+# In[205]:
 
 
 import json
 
 with open('cat_to_name.json', 'r') as f:
     cat_to_name = json.load(f)
-    
+    print(cat_to_name)
 
 
-#Visualization Code (adapted from helper.py)
-
-
-def view_class(img, ps, version="Flowers"):
-    #Function for viewing an image and the ten most similar classes
-    
-    ps = ps.data.numpy().squeeze()
-    
-    fig, (ax1, ax2) = plt.subplots(figsize=(6,9), ncols=2)
-    ax1.imshow(img.resize_(1, 28, 28).numpy().squeeze())
-    ax1.axis('off')
-    ax2.barh(np.arange(10), ps)
-    ax2.set_aspect(0.1)
-    ax2.set_yticks(np.arange(10))
-    if version == "FlowerClass":
-        ax2.set_yticklabels(cat_to_name.values())
-    elif version == "MNIST":
-        ax2.set_yticklabels(np.arange(10));
-    ax2.set_title('Class Probability')
-    ax2.set_xlim(0, 1.1)
-
-    plt.tight_layout()
-
-def imshow(image, ax=None, title=None, normalize=True):
-    """Imshow for Tensor."""
-    if ax is None:
-        fig, ax = plt.subplots()
-    image = image.numpy().transpose((1, 2, 0))
-
-    if normalize:
-        mean = np.array([0.485, 0.456, 0.406])
-        std = np.array([0.229, 0.224, 0.225])
-        image = std * image + mean
-        image = np.clip(image, 0, 1)
-
-    ax.imshow(image)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_visible(False)
-    ax.spines['bottom'].set_visible(False)
-    ax.tick_params(axis='both', length=0)
-    ax.set_xticklabels('')
-    ax.set_yticklabels('')
-
-    return ax
-
-for images, labels in next(iter(trainloader)):
-    imshow(images[0], normalize=False)
-    break
 
 
 # # Building and training the classifier
@@ -180,105 +145,134 @@ for images, labels in next(iter(trainloader)):
 # 
 # When training make sure you're updating only the weights of the feed-forward network. You should be able to get the validation accuracy above 70% if you build everything right. Make sure to try different hyperparameters (learning rate, units in the classifier, epochs, etc) to find the best model. Save those hyperparameters to use as default values in the next part of the project.
 
-# In[105]:
+# In[206]:
 
 
 # TODO: Build and train your network
 
-vmodel = models.vgg16(pretrained=True)
 
-# Hyperparameters for  network
-input_size = 25088
-hidden_sizes = [5000, 4096, 2560, 500]
-output_size = 102
 
-# Build a feed-forward network
 
-modelClass = nn.Sequential(OrderedDict([
-                      ('fc1', nn.Linear(input_size, hidden_sizes[0])),
-                      ('relu1', nn.ReLU()),
-                      ('fc2', nn.Linear(hidden_sizes[0], hidden_sizes[1])),
-                      ('relu2', nn.ReLU()),
-                      ('fc3', nn.Linear(hidden_sizes[1], hidden_sizes[2])),
-                      ('relu3', nn.ReLU()),
-                      ('fc4', nn.Linear(hidden_sizes[2], hidden_sizes[3])),
-                      ('relu4', nn.ReLU()),
-                      ('logits', nn.Linear(hidden_sizes[3], output_size))]))
+#TODO: Create CUDA/CPU Interface
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-modelClass = nn.Dropout(p=0.2)
+def defineModel(modeltoset = models.vgg19_bn(pretrained=True)):
 
-#Freeze Parameters (Lesson 4 - 11 Transfer Learning)
-for param in vmodel.parameters():
-    param.requires_grad = False
+    model = modeltoset
+    #Freeze Parameters (Lesson 4 - 11 Transfer Learning)
+    for param in model.parameters():
+        param.requires_grad = False
+
+
+    # Hyperparameters for  network
+    input_size = 4608
+    hidden_sizes = [4032, 3200, 2680, 512]
+    output_size = 102
+    p_dropout = 0.1
+    epochs = 6
+    learningrate = 0.001
+    model.to(device)
+
+    modelClass = nn.Sequential(OrderedDict([
+                          ('fc1', nn.Linear(input_size, hidden_sizes[0])),
+                          ('relu', nn.ReLU()),
+                          ('fc2', nn.Linear(hidden_sizes[0], hidden_sizes[1])),
+                          ('relu', nn.ReLU()),
+                          ('fc3', nn.Linear(hidden_sizes[1], hidden_sizes[2])),
+                          ('relu', nn.ReLU()),
+                          ('fc4', nn.Linear(hidden_sizes[2], hidden_sizes[3])),
+                          ('relu', nn.ReLU()),
+                          ('output', nn.LogSoftmax(dim=1))]))
+
+    model.dropout = nn.Dropout(p_dropout)
+
+
+    model.classifier = modelClass
+
+    for param in model.classifier.parameters():
+        param.requires_grad = True
     
-vmodel.classifier = modelClass
-
+    model.to(device)
+    return model
+    
+    
+model = defineModel()
+##Adapted Code from Transfer Learning Exercise
 #Train Network (Lesson 4 - 7 Fashion MNIST Exercise)
-criterion = nn.CrossEntropyLoss()
-#optimizer = optim.SGD(vmodel.parameters(), lr=0.003)
-
-epochs = 6
-print_every = 40
-steps = 0
-for e in range(epochs):
-    running_loss = 0
-    for images, labels in next(iter(trainloader)):
-        steps += 1
-        #Flatten images to a 50176 (224 x 224) vector
-        images.resize_(images.size()[0], 50176)
-        
-        #optimizer.zero_grad()
-        
-        # Forward and backward passes
-        output = vmodel.forward(images)
-        loss = criterion(output, labels)
-        loss.backward()
-        #optimizer.step()
-        #issue appears to be here
-        running_loss += loss.item()
-        
-        if steps % print_every == 0:
-            print("Epoch: {}/{}... ".format(e+1, epochs),
-                  "Loss: {:.4f}".format(running_loss/print_every))
-            
-            running_loss = 0
+criterion = nn.NLLLoss().to(device)
+# Only train the classifier parameters, feature parameters are frozen
+optimizer = optim.Adam(list(model.classifier.parameters()), 0.001)
 
 
-# Clear the gradients, do this because gradients are accumulated
-#optimizer.zero_grad()
+# In[207]:
 
-# Forward pass, then backward pass, then update weights
-output = vmodel.forward(images)
-loss = criterion(output, labels)
-loss.backward()
-print('Gradient -', vmodel.fc1.weight.grad)
-#optimizer.step()
+
+
+def learningfunction(model, loader, epochs, printevery, criterion, optimizer, device = 'cuda'):
+
+    print_every = printevery
+    steps = 0
+    epochstep = 0
+
+    model.to(device)
+
+    for e in range(epochs):
+        running_loss = 0
+        epochstep += 1
+
+
+        for index in next(iter(loader)):
+
+            imagesn = index[0]
+            labelsn = index[1]
+            images, labels = imagesn.to(device), labelsn.to(device)
+        #for images in next(iter(trainloader)):
+            steps += 1
+
+            optimizer.zero_grad()
+
+            # Forward and backward passes
+
+
+            output = model.forward(images)        
+            loss = criterion(output, labels)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+
+            if steps % print_every == 0:
+                print("Epoch: {}/{}... ".format(e+1, epochs),
+                      "Loss: {:.4f}".format(running_loss/print_every))
+
+                running_loss = 0
+
+
+learningfunction(model, trainloader, 20, 40, criterion, optimizer, 'cuda')
 
 
 # ## Testing your network
 # 
 # It's good practice to test your trained network on test data, images the network has never seen either in training or validation. This will give you a good estimate for the model's performance on completely new images. Run the test images through the network and measure the accuracy, the same way you did validation. You should be able to reach around 70% accuracy on the test set if the model has been trained well.
 
-# In[ ]:
+# In[208]:
 
 
-# TODO: Do validation on the test set
-#Still from the Fashion MNIST Exercise
+def accuracycheck(testloader):
 
-dataiter = iter(testloader)
-images, labels = dataiter.next()
-img = images[0]
-# Convert 2D image to 1D vector
-img = img.resize_(1, 50176)
-# Turn off gradients to speed up this part
-with torch.no_grad():
-    logits = vmodel.forward(img)
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for data in testloader:
+            images, labels = data
+            outputs = model(images.to('cuda'))
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels.to('cuda')).sum().item()
 
-# TODO: Calculate the class probabilities (softmax) for img
-ps = F.softmax(logits, dim=1)
+    print('Accuracy of the network on the 10000 test images: %d %%' % (100 * correct / total))
 
-# Plot the image and probabilities
-view_class(img.resize_(1, 224, 224), ps, version='Flowers')
+accuracycheck(testloader)
 
 
 # ## Save the checkpoint
@@ -289,16 +283,21 @@ view_class(img.resize_(1, 224, 224), ps, version='Flowers')
 # 
 # Remember that you'll want to completely rebuild the model later so you can use it for inference. Make sure to include any information you need in the checkpoint. If you want to load the model and keep training, you'll want to save the number of epochs as well as the optimizer state, `optimizer.state_dict`. You'll likely want to use this trained model in the next part of the project, so best to save it now.
 
-# In[ ]:
+# In[209]:
 
 
 #Save the model
 #Lesson 4 - 9 (Saving and Loading Trained Networks)
+model.class_to_idx = trainset.class_to_idx
 
-checkpoint = {'input_size': 50176,
-              'output_size': 10,
-              'hidden_layers': [each.out_features for each in vmodel.hidden_layers],
-              'state_dict': vmodel.state_dict()}
+
+checkpoint = {'input_size': 4608,
+              'output_size': 103,              
+              'hidden_layers': model.classifier,
+              'state_dict': model.state_dict(),
+              'optimizer' : optimizer.state_dict(),
+              'model_index' : model.class_to_idx,
+             }
 
 
 torch.save(checkpoint, 'checkpoint.pth')
@@ -308,21 +307,26 @@ torch.save(checkpoint, 'checkpoint.pth')
 # 
 # At this point it's good to write a function that can load a checkpoint and rebuild the model. That way you can come back to this project and keep working on it without having to retrain the network.
 
-# In[ ]:
+# In[210]:
 
 
 #Lesson 4 - 9 Saving and Loading Trained Networks
-def load_checkpoint(filepath):
-    checkpoint = torch.load(filepath)
-    vmodel = fc_model.Network(checkpoint['input_size'],
-                             checkpoint['output_size'],
-                             checkpoint['hidden_layers'])
-    vmodel.load_state_dict(checkpoint['state_dict'])
-    
-    return vmodel
+#model = defineModel()
 
-vmodel = load_checkpoint('checkpoint.pth')
-print(vmodel)
+
+def load_checkpoint(filepath, model):
+    checkpoint = torch.load(filepath)
+    model = (checkpoint['input_size'],
+                          checkpoint['output_size'],
+                          checkpoint['hidden_layers'],
+                          checkpoint['state_dict'], 
+                          checkpoint['optimizer'], 
+                          checkpoint['model_index'],
+    model.load_state_dict(checkpoint['state_dict']))
+    return checkpoint
+    
+   
+
 
 
 # # Inference for classification
@@ -351,64 +355,68 @@ print(vmodel)
 # 
 # And finally, PyTorch expects the color channel to be the first dimension but it's the third dimension in the PIL image and Numpy array. You can reorder dimensions using [`ndarray.transpose`](https://docs.scipy.org/doc/numpy-1.13.0/reference/generated/numpy.ndarray.transpose.html). The color channel needs to be first and retain the order of the other two dimensions.
 
-# In[ ]:
+# In[211]:
 
 
 def process_image(image):
     ''' Scales, crops, and normalizes a PIL image for a PyTorch model,
         returns an Numpy array
     '''
+    size = 244, 244
+    PILImage = Image.open(image)
+    PILImage.thumbnail(size)
+    PILImage.crop(centerCoords(PILImage))
     
-    # TODO: Process a PIL image for use in a PyTorch model
-    #From documentation : http://pillow.readthedocs.io/en/3.1.x/reference/Image.html#PIL.Image.Image.thumbnail
-    #Open and Thumbnail the image
-    pilImage = Image.open(image)
-    pilImage.Thumbnail(256, 256)
-    
-    #Setup Tuple with Image Coordinates
-    mbox = 16, 240, 240, 16
-    #Crop the Coords taking the center
-    pilImage.crop(box=mbox)
-    
-    #Normalize image values to 0 - 1 range
-    np_image = np.array(pilImage)
-    np_image *= 255.0/np_image.max()
-    
+    np_image = np.array(PILImage)
+    np_image = np_image / 255
     netmean = [0.485, 0.456, 0.406]
     netstd =  [0.229, 0.224, 0.225]
+    np_image = (np_image - netmean) / netstd
+    #print('Shape in Process Image :', np_image.shape)
+    np_image = np.transpose(np_image, (2,0,1))
+    #print('Post Transpose Shape in Process image: ', np_image.shape)
+    return np_image
+ 
+def centerCoords(image, crop_size = (244, 244)):
+    xwidth, xheight = image.size
+    ywidth, yheight = crop_size
+    left = (xwidth - ywidth) / 2
+    top = (xheight - yheight) / 2
+    right = (xwidth + ywidth) / 2
+    bottom = (xheight + yheight) / 2
     
-    for c in np_image:
-        c -= netmean
-        c /= netstd
-        
-    np_image.transpose(2,0)
+    #Coords must be returned left, top, right bottom for PIL
+    return (left, top, right, bottom)
+
+  
 
 
 # To check your work, the function below converts a PyTorch tensor and displays it in the notebook. If your `process_image` function works, running the output through this function should return the original image (except for the cropped out portions).
 
-# In[ ]:
+# In[212]:
 
 
 def imshow(image, ax=None, title=None):
     """Imshow for Tensor."""
-    if ax is None:
-        fig, ax = plt.subplots()
+#     if ax is None:
+#         fig, ax = plt.subplots()
     
     # PyTorch tensors assume the color channel is the first dimension
     # but matplotlib assumes is the third dimension
-    image = image.numpy().transpose((1, 2, 0))
-    
-    # Undo preprocessing
+    image = image.transpose((1, 2, 0))
+   
+    #Undo preprocessing
     mean = np.array([0.485, 0.456, 0.406])
     std = np.array([0.229, 0.224, 0.225])
-    image = std * image + mean
+    image = (image * std) + mean
     
     # Image needs to be clipped between 0 and 1 or it looks like noise when displayed
     image = np.clip(image, 0, 1)
     
-    ax.imshow(image)
     
-    return ax
+    
+    return image
+
 
 
 # ## Class Prediction
@@ -427,14 +435,90 @@ def imshow(image, ax=None, title=None):
 # > ['70', '3', '45', '62', '55']
 # ```
 
-# In[ ]:
+# In[213]:
 
 
-def predict(image_path, model, topk=5):
+model = defineModel()
+path = r'flowers/valid/32/'
+checkpoint = load_checkpoint('checkpoint.pth', model)
+
+
+examples = 1
+#def plotpredicts(prob, classnames, classidx, picture:)
+
+
+
+def displayplot(img, topprob, labels):
+    display, (ax1, ax2) = plt.subplots(figsize=(8,9), nrows = 2, ncols=1, squeeze=True)
+    ax1.imshow(imshow(img))
+    ax1.set_title('Predictions')
+    ax1.axis('off')
+    
+    ax2.barh(range(5), topprob.data.tolist())
+    #ax2.set_yticklabels(range(len(labels)), labels)
+    labels.insert(0, '')
+    print(labels)
+    
+    ax2.set_yticklabels(labels, size='small')
+    ax2.set_title('Class Probability')
+    ax2.set_xlim(0, 100)
+    #ax2.xticks(rotation=45)
+
+
+def predict(image_path, model, examples, topk=5):
     ''' Predict the class (or classes) of an image using a trained deep learning model.
     '''
+    step = 0
     
-    # TODO: Implement the code to predict the class from an image file
+    
+    for infile in os.listdir(path):
+            #print(infile)
+        if (step < examples):            
+            img = process_image(path + infile)
+            #imshow(img)
+            step += 1
+
+    
+    imgval = torch.from_numpy(img).clone()
+    #
+    imgval = imgval.unsqueeze_(0)    
+    imgval = imgval.resize_(64, 3,96,96)    
+    out = model(imgval.to('cuda', torch.float)) #.to('cuda')
+    
+    probs = out[0]
+    classes = out[1]
+    
+    k = 5
+    
+    topprob = probs.topk(k)[1]
+    topclass = classes.topk(k)[1]
+    topmost = classes.topk(1)[1]
+    print('Probs are : ', topprob)
+    print('Classes are : ', topclass)
+    idxtoClass = checkpoint['model_index']
+    invertidx = {v : k for k, v in idxtoClass.items()}
+    #print(invertidx)
+    topidx = []
+    toppity = []
+    toppredict = ''
+    for a in topmost.data.tolist():
+        toppity.append(invertidx[a])
+    for i in toppity:
+        toppredict= cat_to_name[i]
+   
+    for i in topclass.data.tolist(): 
+        topidx.append(invertidx[i])
+    
+    labels = []
+    
+    for i in topidx:
+        print(cat_to_name[i])
+        labels.append(cat_to_name[i])
+     
+    displayplot(img, topprob, labels)
+    
+    
+predict(path, model, examples, 5)
 
 
 # ## Sanity Checking
@@ -445,7 +529,7 @@ def predict(image_path, model, topk=5):
 # 
 # You can convert from the class integer encoding to actual flower names with the `cat_to_name.json` file (should have been loaded earlier in the notebook). To show a PyTorch tensor as an image, use the `imshow` function defined above.
 
-# In[ ]:
+# In[214]:
 
 
 # TODO: Display an image along with the top 5 classes
